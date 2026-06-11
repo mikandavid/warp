@@ -345,7 +345,7 @@ impl AgentRunDisplayStatus {
                     return Self::from_task_state(task);
                 }
                 let history_model = BlocklistAIHistoryModel::as_ref(app);
-                entry::conversation_id_shadowed_by_task(task, history_model)
+                orchestration_topology::conversation_id_shadowed_by_task(task, history_model)
                     .and_then(|conversation_id| history_model.conversation(&conversation_id))
                     .map(|conversation| Self::from_conversation_status(conversation.status()))
                     .unwrap_or_else(|| Self::from_task_state(task))
@@ -1463,7 +1463,8 @@ impl AgentConversationsModel {
 
         let conversation_id = history_model.find_conversation_id_by_server_token(server_token)?;
         if let Some(task) = self.tasks.values().find(|task| {
-            entry::conversation_id_shadowed_by_task(task, history_model) == Some(conversation_id)
+            orchestration_topology::conversation_id_shadowed_by_task(task, history_model)
+                == Some(conversation_id)
         }) {
             return Some(entry::entry_for_task(task, &self.tasks, history_model, app));
         }
@@ -1716,20 +1717,22 @@ impl AgentConversationsModel {
         );
     }
 
-    /// Aggregated artifacts for `task`: its own artifacts, its transitive
-    /// child runs' artifacts, and the linked local conversation subtree's
-    /// artifacts, deduped by identity. Reads only in-memory state.
+    /// Aggregated artifacts for the orchestration tree rooted at `task`
+    /// (the run, its descendants' run records, and their linked local
+    /// conversations), deduped by identity. Reads only in-memory state.
     pub fn aggregated_task_artifacts(
         &self,
         task: &AmbientAgentTask,
         app: &AppContext,
     ) -> Vec<Artifact> {
-        let history_model = BlocklistAIHistoryModel::as_ref(app);
-        let local_conversation_id = entry::conversation_id_shadowed_by_task(task, history_model);
-        entry::aggregated_run_artifacts(task, &self.tasks, local_conversation_id, history_model)
+        orchestration_topology::aggregated_subtree_artifacts(
+            BlocklistAIHistoryModel::as_ref(app),
+            &self.tasks,
+            orchestration_topology::OrchestrationRoot::Run(task),
+        )
     }
 
-    /// Aggregated artifacts for the conversation subtree rooted at `root_id`,
+    /// Aggregated artifacts for the orchestration tree rooted at `root_id`,
     /// including artifacts on each node's backing run record (the only local
     /// source for remote children's artifacts). Reads only in-memory state.
     pub fn aggregated_conversation_artifacts(
@@ -1737,10 +1740,10 @@ impl AgentConversationsModel {
         root_id: AIConversationId,
         app: &AppContext,
     ) -> Vec<Artifact> {
-        orchestration_topology::aggregated_conversation_artifacts(
+        orchestration_topology::aggregated_subtree_artifacts(
             BlocklistAIHistoryModel::as_ref(app),
             &self.tasks,
-            root_id,
+            orchestration_topology::OrchestrationRoot::Conversation(root_id),
         )
     }
 
