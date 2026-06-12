@@ -14,9 +14,9 @@ use crate::model::{
     SelectedSettings,
 };
 use crate::slides::{
-    AgentSlide, AgentSlideEvent, CustomizeUISlide, IntentionSlide, IntroSlide, IntroSlideEvent,
-    OnboardingModelInfo, OnboardingSlide, ProjectSlide, ThemePickerSlide, ThemePickerSlideEvent,
-    ThirdPartySlide,
+    AgentSlide, AgentSlideEvent, AiSetupSlide, CustomizeUISlide, IntentionSlide, IntroSlide,
+    IntroSlideEvent, OnboardingModelInfo, OnboardingSlide, ProjectSlide, ThemePickerSlide,
+    ThemePickerSlideEvent, ThirdPartySlide,
 };
 use crate::telemetry::OnboardingEvent;
 
@@ -68,6 +68,7 @@ pub struct AgentOnboardingView {
     intro_slide: ViewHandle<IntroSlide>,
     theme_picker_slide: ViewHandle<ThemePickerSlide>,
     intention_slide: ViewHandle<IntentionSlide>,
+    ai_setup_slide: ViewHandle<AiSetupSlide>,
     customize_slide: ViewHandle<CustomizeUISlide>,
     agent_slide: ViewHandle<AgentSlide>,
     third_party_slide: ViewHandle<ThirdPartySlide>,
@@ -121,11 +122,11 @@ impl AgentOnboardingView {
     ) -> Self {
         let onboarding_state = ctx.add_model(|_| {
             OnboardingStateModel::new(
-                models,
-                default_model_id,
-                workspace_enforces_autonomy,
-                agent_modality_enabled,
-                auth_state,
+            models,
+            default_model_id,
+            workspace_enforces_autonomy,
+            agent_modality_enabled,
+            auth_state,
             )
         });
         ctx.subscribe_to_model(&onboarding_state, |me, _model, event, ctx| {
@@ -168,6 +169,11 @@ impl AgentOnboardingView {
         let intention_slide = {
             let onboarding_state = onboarding_state.clone();
             ctx.add_typed_action_view(move |_| IntentionSlide::new(onboarding_state))
+        };
+
+        let ai_setup_slide = {
+            let onboarding_state = onboarding_state.clone();
+            ctx.add_typed_action_view(move |_| AiSetupSlide::new(onboarding_state))
         };
 
         let customize_slide = {
@@ -227,6 +233,7 @@ impl AgentOnboardingView {
             intro_slide,
             theme_picker_slide,
             intention_slide,
+            ai_setup_slide,
             customize_slide,
             agent_slide,
             third_party_slide,
@@ -303,6 +310,9 @@ impl AgentOnboardingView {
             path: crate::slides::layout::ONBOARDING_BG_PATH,
         });
         for path in IntentionSlide::VISUAL_IMAGE_PATHS {
+            asset_cache.load_asset::<ImageType>(AssetSource::Bundled { path });
+        }
+        for path in AiSetupSlide::VISUAL_IMAGE_PATHS {
             asset_cache.load_asset::<ImageType>(AssetSource::Bundled { path });
         }
         for path in CustomizeUISlide::VISUAL_IMAGE_PATHS {
@@ -391,6 +401,7 @@ impl View for AgentOnboardingView {
             OnboardingStep::Intro => ChildView::new(&self.intro_slide).finish(),
             OnboardingStep::ThemePicker => ChildView::new(&self.theme_picker_slide).finish(),
             OnboardingStep::Intention => ChildView::new(&self.intention_slide).finish(),
+            OnboardingStep::AiSetup => ChildView::new(&self.ai_setup_slide).finish(),
             OnboardingStep::Customize => ChildView::new(&self.customize_slide).finish(),
             OnboardingStep::Agent => ChildView::new(&self.agent_slide).finish(),
             OnboardingStep::ThirdParty => ChildView::new(&self.third_party_slide).finish(),
@@ -452,6 +463,9 @@ impl TypedActionView for AgentOnboardingView {
                 dispatch_onboarding_action_to_slide(slide, *action, ctx)
             }),
             OnboardingStep::Intention => self.intention_slide.update(ctx, |slide, ctx| {
+                dispatch_onboarding_action_to_slide(slide, *action, ctx)
+            }),
+            OnboardingStep::AiSetup => self.ai_setup_slide.update(ctx, |slide, ctx| {
                 dispatch_onboarding_action_to_slide(slide, *action, ctx)
             }),
             OnboardingStep::Customize => self.customize_slide.update(ctx, |slide, ctx| {
