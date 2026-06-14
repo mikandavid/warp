@@ -156,16 +156,16 @@ impl Block {
         }
     }
 
-    /// Sets control to user with Stop reason if a long-running control state exists.
+    /// Marks an agent-associated command as stopped by the user.
     pub fn set_user_control_with_stop_reason(&mut self) {
         if let InteractionMode::Agent(AgentInteractionMetadata {
-            long_running_control_state: Some(ref mut state),
+            ref mut long_running_control_state,
             ..
         }) = self.interaction_mode
         {
-            *state = LongRunningCommandControlState::User {
+            *long_running_control_state = Some(LongRunningCommandControlState::User {
                 reason: UserTakeOverReason::Stop,
-            };
+            });
         }
     }
 

@@ -2337,6 +2337,16 @@ struct TerminalViewMouseStates {
     breadcrumbs_horizontal_scroll: ClippedScrollStateHandle,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct CtrlCState {
+    has_copiable_block_selection: bool,
+    has_block_list_selection: bool,
+    has_alt_screen_selection: bool,
+    is_long_running: bool,
+    is_agent_in_control_of_command: bool,
+    is_executing_agent_requested_command: bool,
+}
+
 /// Where content was routed when sent to a CLI agent.
 /// Returned by [`TerminalView::try_send_text_to_cli_agent_or_rich_input`]
 /// so callers can report the correct telemetry destination without a
@@ -7387,6 +7397,16 @@ impl TerminalView {
                     });
                 }
 
+                // While the command was blocked on confirmation, the AI block grabbed focus so
+                // Enter could accept it. Now that it's executing, hand focus back to the
+                // input/terminal so Ctrl-C reaches the command and follow-ups reach the CLI
+                // subagent input if the command becomes long-running.
+                // We call `redetermine_global_focus` rather than `redetermine_terminal_focus`
+                // because the latter deliberately no-ops while an AI block is focused.
+                if ctx.is_self_or_child_focused() {
+                    self.redetermine_global_focus(ctx);
+                }
+
                 // If the command turns out to be long-running, lock the input in agent mode.
                 ctx.spawn(
                     // Command execution is triggered by a subscriber to the event above, so
@@ -7398,7 +7418,10 @@ impl TerminalView {
                             .lock()
                             .block_list()
                             .block_with_id(&block_id)
-                            .is_some_and(|block| block.is_active_and_long_running())
+                            .is_some_and(|block| {
+                                block.is_agent_driving_command()
+                                    && block.is_active_and_long_running()
+                            })
                         {
                             me.input.update(ctx, |input, ctx| {
                                 input.set_input_mode_agent(false, ctx);
@@ -8382,6 +8405,34 @@ impl TerminalView {
             });
         }
     }
+    fn cancel_requested_long_running_command(
+        &mut self,
+        conversation_id: AIConversationId,
+        action_id: AIAgentActionId,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        let did_cancel_local_action = self.ai_action_model.update(ctx, |action_model, ctx| {
+            action_model.cancel_requested_command_with_id(
+                conversation_id,
+                &action_id,
+                CancellationReason::ManuallyCancelled,
+                ctx,
+            )
+        });
+        if did_cancel_local_action {
+            let mut model = self.model.lock();
+            let active_block = model.block_list_mut().active_block_mut();
+            if active_block.ai_conversation_id() == Some(conversation_id)
+                && active_block.requested_command_action_id() == Some(&action_id)
+            {
+                active_block.set_user_control_with_stop_reason();
+            }
+            drop(model);
+            self.user_write_ctrl_c_to_pty(ctx);
+        } else {
+            self.stop_local_agent_conversation(conversation_id, ctx);
+        }
+    }
 
     fn user_write_ctrl_c_to_pty(&mut self, ctx: &mut ViewContext<Self>) {
         self.write_user_bytes_to_pty(vec![escape_sequences::C0::ETX], ctx);
@@ -8431,36 +8482,44 @@ impl TerminalView {
     /// Windows users expect ctrl-c to copy if there is selected text. Otherwise,
     /// we perform the normal ctrl-c action.
     fn ctrl_c(&mut self, ctx: &mut ViewContext<Self>) {
-        let (
-            has_block_list_selection,
-            has_alt_screen_selection,
-            is_long_running,
-            is_agent_in_control_of_command,
-        ) = {
+        let ctrl_c_state = {
             let model = self.model.lock();
             let has_alt_screen_selection = model.alt_screen().selection().is_some();
             let has_block_list_selection = model.block_list().selection().is_some();
             let active_block = model.block_list().active_block();
             let is_long_running = active_block.is_active_and_long_running();
             let is_agent_in_control_of_command = active_block.is_agent_in_control();
-            (
+            // An agent-requested command that has started running but isn't yet flagged
+            // long-running. Ctrl-C must still interrupt it; otherwise it falls through
+            // to the AI/rich-content path and never reaches the PTY.
+            let is_not_yet_monitored_by_agent = active_block.long_running_control_state().is_none()
+                || active_block
+                    .long_running_control_state()
+                    .and_then(|state| state.user_take_over_reason())
+                    .is_some_and(UserTakeOverReason::is_stop);
+            let is_executing_agent_requested_command = !is_long_running
+                && is_not_yet_monitored_by_agent
+                && active_block.requested_command_action_id().is_some()
+                && active_block.ai_conversation_id().is_some()
+                && (active_block.is_executing() || active_block.is_command_grid_active());
+            CtrlCState {
+                has_copiable_block_selection: false,
                 has_block_list_selection,
                 has_alt_screen_selection,
                 is_long_running,
                 is_agent_in_control_of_command,
-            )
+                is_executing_agent_requested_command,
+            }
         };
         // We don't want to copy blocks in AI input mode because those are
         // context blocks.
         let has_copiable_block_selection = !self.selected_blocks.is_empty()
             && !self.ai_input_model.as_ref(ctx).is_ai_input_enabled();
-
         self.ctrl_c_internal(
-            has_copiable_block_selection,
-            has_block_list_selection,
-            has_alt_screen_selection,
-            is_long_running,
-            is_agent_in_control_of_command,
+            CtrlCState {
+                has_copiable_block_selection,
+                ..ctrl_c_state
+            },
             ctx,
         );
 
@@ -8472,31 +8531,28 @@ impl TerminalView {
     /// Copy if there is a selection. Otherwise, we defer to the normal ctrl-c
     /// behaviour.
     #[cfg(windows)]
-    fn ctrl_c_internal(
-        &mut self,
-        has_copiable_block_selection: bool,
-        has_block_list_selection: bool,
-        has_alt_screen_selection: bool,
-        is_long_running: bool,
-        is_agent_in_control_of_command: bool,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        if has_block_list_selection {
+    fn ctrl_c_internal(&mut self, ctrl_c_state: CtrlCState, ctx: &mut ViewContext<Self>) {
+        if ctrl_c_state.has_block_list_selection {
             self.copy(ctx);
             self.clear_selections_when_shell_mode_without_focusing_input(ctx);
             return;
-        } else if has_alt_screen_selection {
+        } else if ctrl_c_state.has_alt_screen_selection {
             self.copy(ctx);
             self.model.lock().alt_screen_mut().clear_selection();
             return;
-        } else if has_copiable_block_selection {
+        } else if ctrl_c_state.has_copiable_block_selection {
             // If there are blocks selected, we want to copy them but
             // not prevent the normal ctrl-c behaviour.
             self.copy(ctx);
             self.clear_selections_when_shell_mode_without_focusing_input(ctx);
         }
 
-        self.ctrl_c_to_active_block(is_long_running, is_agent_in_control_of_command, ctx);
+        self.ctrl_c_to_active_block(
+            ctrl_c_state.is_long_running,
+            ctrl_c_state.is_agent_in_control_of_command,
+            ctrl_c_state.is_executing_agent_requested_command,
+            ctx,
+        );
     }
 
     /// Focuses the provided AI block if this terminal view (or some part of it)
@@ -8535,55 +8591,82 @@ impl TerminalView {
     }
 
     #[cfg(not(windows))]
-    fn ctrl_c_internal(
-        &mut self,
-        has_copiable_block_selection: bool,
-        has_block_list_selection: bool,
-        has_alt_screen_selection: bool,
-        is_long_running: bool,
-        is_agent_in_control_of_command: bool,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        if has_block_list_selection || has_copiable_block_selection {
+    fn ctrl_c_internal(&mut self, ctrl_c_state: CtrlCState, ctx: &mut ViewContext<Self>) {
+        if ctrl_c_state.has_block_list_selection || ctrl_c_state.has_copiable_block_selection {
             self.clear_selections_when_shell_mode_without_focusing_input(ctx);
-        } else if has_alt_screen_selection {
+        } else if ctrl_c_state.has_alt_screen_selection {
             self.model.lock().alt_screen_mut().clear_selection();
         }
-        self.ctrl_c_to_active_block(is_long_running, is_agent_in_control_of_command, ctx);
+        self.ctrl_c_to_active_block(
+            ctrl_c_state.is_long_running,
+            ctrl_c_state.is_agent_in_control_of_command,
+            ctrl_c_state.is_executing_agent_requested_command,
+            ctx,
+        );
     }
 
     fn ctrl_c_to_active_block(
         &mut self,
         is_long_running: bool,
         is_agent_in_control_of_command: bool,
+        is_executing_agent_requested_command: bool,
         ctx: &mut ViewContext<Self>,
     ) {
         if is_agent_in_control_of_command {
             self.cli_subagent_controller.update(ctx, |controller, ctx| {
                 controller.switch_control_to_user(UserTakeOverReason::Stop, ctx);
             });
-        } else if is_long_running {
-            // After cancelling an agent-initiated long-running command, the conversation
-            // itself is stopped and cannot be re-entered until the next user query, so
-            // Ctrl+C should interrupt the command and cancel conversation progress.
-            let conversation_id_to_stop = {
+        } else if is_long_running || is_executing_agent_requested_command {
+            enum LongRunningCtrlC {
+                CancelRequestedCommand {
+                    conversation_id: AIConversationId,
+                    action_id: AIAgentActionId,
+                },
+                StopConversation(AIConversationId),
+                WriteCtrlCToPty,
+            }
+
+            let ctrl_c = {
                 let model = self.model.lock();
                 let active_block = model.block_list().active_block();
-                active_block
-                    .long_running_control_state()
-                    .and_then(|state| {
-                        state
+                let result = match active_block.long_running_control_state() {
+                    None => active_block
+                        .ai_conversation_id()
+                        .zip(active_block.requested_command_action_id().cloned())
+                        .map(|(conversation_id, action_id)| {
+                            LongRunningCtrlC::CancelRequestedCommand {
+                                conversation_id,
+                                action_id,
+                            }
+                        })
+                        .unwrap_or(LongRunningCtrlC::WriteCtrlCToPty),
+                    Some(state)
+                        if state
                             .user_take_over_reason()
-                            .is_some_and(UserTakeOverReason::is_stop)
-                            .then(|| active_block.ai_conversation_id())
-                    })
-                    .flatten()
+                            .is_some_and(UserTakeOverReason::is_stop) =>
+                    {
+                        // After cancelling an agent-initiated long-running command, the conversation
+                        // itself is stopped and cannot be re-entered until the next user query, so
+                        // Ctrl+C should interrupt the command and cancel conversation progress.
+                        active_block
+                            .ai_conversation_id()
+                            .map(LongRunningCtrlC::StopConversation)
+                            .unwrap_or(LongRunningCtrlC::WriteCtrlCToPty)
+                    }
+                    Some(_) => LongRunningCtrlC::WriteCtrlCToPty,
+                };
+                result
             };
 
-            if let Some(conversation_id) = conversation_id_to_stop {
-                self.stop_local_agent_conversation(conversation_id, ctx);
-            } else {
-                self.user_write_ctrl_c_to_pty(ctx);
+            match ctrl_c {
+                LongRunningCtrlC::CancelRequestedCommand {
+                    conversation_id,
+                    action_id,
+                } => self.cancel_requested_long_running_command(conversation_id, action_id, ctx),
+                LongRunningCtrlC::StopConversation(conversation_id) => {
+                    self.stop_local_agent_conversation(conversation_id, ctx)
+                }
+                LongRunningCtrlC::WriteCtrlCToPty => self.user_write_ctrl_c_to_pty(ctx),
             }
         } else {
             self.maybe_handle_ctrl_c_in_rich_content_block(ctx);
