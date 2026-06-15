@@ -18,7 +18,7 @@ use crate::ai::ambient_agents::{AgentSource, AmbientAgentTask, AmbientAgentTaskI
 use crate::ai::artifacts::Artifact;
 use crate::ai::blocklist::history_model::{AIConversationMetadata, BlocklistAIHistoryModel};
 use crate::ai::blocklist::orchestration_topology::{
-    aggregated_subtree_artifacts, conversation_id_shadowed_by_task,
+    aggregated_subtree_artifacts, conversation_id_shadowed_by_task, SubtreeRoot,
 };
 use crate::ai::conversation_navigation::ConversationNavigationData;
 use crate::auth::{AuthStateProvider, UserUid};
@@ -493,7 +493,7 @@ pub(super) fn entry_for_task(
             artifacts: aggregated_subtree_artifacts(
                 history_model,
                 tasks,
-                ConversationOrTaskId::TaskId(task.task_id),
+                SubtreeRoot::Task(task.task_id),
             ),
         },
         backing: AgentConversationBackingData {
@@ -611,7 +611,7 @@ fn entry_for_conversation_parts(
             artifacts: aggregated_subtree_artifacts(
                 history_model,
                 tasks,
-                ConversationOrTaskId::ConversationId(conversation_id),
+                SubtreeRoot::Conversation(conversation_id),
             ),
         },
         backing: AgentConversationBackingData {
