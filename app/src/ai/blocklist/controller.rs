@@ -2596,6 +2596,45 @@ impl BlocklistAIController {
         }
     }
 
+    pub fn complete_cli_subagent_command(
+        &mut self,
+        conversation_id: AIConversationId,
+        ctx: &mut ModelContext<Self>,
+    ) {
+        self.cancel_conversation_progress(
+            conversation_id,
+            CancellationReason::OptimisticCLISubagentCompletion,
+            ctx,
+        );
+
+        if self
+            .in_flight_response_streams
+            .has_active_stream_for_conversation(conversation_id, ctx)
+            || self
+                .action_model
+                .as_ref(ctx)
+                .has_unfinished_actions_for_conversation(conversation_id)
+        {
+            return;
+        }
+
+        let history_model = BlocklistAIHistoryModel::handle(ctx);
+        let is_in_progress = history_model
+            .as_ref(ctx)
+            .conversation(&conversation_id)
+            .is_some_and(|conversation| conversation.status().is_in_progress());
+        if is_in_progress {
+            history_model.update(ctx, |history_model, ctx| {
+                history_model.update_conversation_status(
+                    self.terminal_view_id,
+                    conversation_id,
+                    ConversationStatus::Success,
+                    ctx,
+                );
+            });
+        }
+    }
+
     /// Clears finished action results for a conversation. Used when reverting.
     pub fn clear_finished_action_results(
         &mut self,

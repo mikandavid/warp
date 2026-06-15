@@ -5327,6 +5327,36 @@ fn ctrl_c_after_transfer_takeover_does_not_cancel_conversation() {
 }
 
 #[test]
+fn completed_idle_cli_subagent_command_marks_conversation_success() {
+    App::test((), |mut app| async move {
+        initialize_app_for_terminal_view(&mut app);
+
+        let terminal = add_window_with_terminal(&mut app, None);
+        let conversation_id = terminal.update(&mut app, |view, ctx| {
+            let conversation_id =
+                BlocklistAIHistoryModel::handle(ctx).update(ctx, |history, ctx| {
+                    history.start_new_conversation(view.view_id, false, false, false, ctx)
+                });
+
+            let conversation = BlocklistAIHistoryModel::as_ref(ctx)
+                .conversation(&conversation_id)
+                .expect("conversation should exist");
+            assert_eq!(conversation.status(), &ConversationStatus::InProgress);
+            view.ai_controller.update(ctx, |controller, ctx| {
+                controller.complete_cli_subagent_command(conversation_id, ctx);
+            });
+            conversation_id
+        });
+        terminal.read(&app, |_, ctx| {
+            let conversation = BlocklistAIHistoryModel::as_ref(ctx)
+                .conversation(&conversation_id)
+                .expect("conversation should exist");
+            assert_eq!(conversation.status(), &ConversationStatus::Success);
+        });
+    })
+}
+
+#[test]
 fn inline_agent_view_persists_across_transfer_takeover_for_monitored_long_running_command() {
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);

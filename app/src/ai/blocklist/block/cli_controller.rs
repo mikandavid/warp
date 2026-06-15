@@ -231,15 +231,9 @@ impl CLISubagentController {
                         });
 
                     if is_inline_agent_view {
-                        // Mark conversation as successfully completed BEFORE exiting agent view.
-                        // The command finished naturally, so this is a successful completion.
                         if let Some(conversation_id) = conversation_id {
                             me.controller.update(ctx, |controller, ctx| {
-                                controller.cancel_conversation_progress(
-                                    conversation_id,
-                                    CancellationReason::OptimisticCLISubagentCompletion,
-                                    ctx,
-                                );
+                                controller.complete_cli_subagent_command(conversation_id, ctx);
                             });
                         }
                     }
