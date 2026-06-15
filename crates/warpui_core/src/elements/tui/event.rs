@@ -45,8 +45,6 @@ pub struct TuiEventContext {
 /// A typed action queued during element-tree dispatch, attributed to the view
 /// whose subtree raised it. Drained by the runtime, which dispatches it
 /// through the shared responder chain rooted at the origin view.
-// Drained by the TUI runtime (slice 03c); these fields are dead until then.
-#[allow(dead_code)]
 pub(crate) struct TuiDispatchedAction {
     pub(crate) origin_view_id: EntityId,
     pub(crate) action: Box<dyn Action>,
@@ -74,14 +72,10 @@ impl TuiEventContext {
         });
     }
 
-    // Drained by the TUI runtime (slice 03c); dead until then.
-    #[allow(dead_code)]
     pub(crate) fn take_updates(&mut self) -> Vec<TuiAppUpdate> {
         std::mem::take(&mut self.updates)
     }
 
-    // Drained by the TUI runtime (slice 03c); dead until then.
-    #[allow(dead_code)]
     pub(crate) fn take_typed_actions(&mut self) -> Vec<TuiDispatchedAction> {
         std::mem::take(&mut self.typed_actions)
     }
@@ -89,8 +83,6 @@ impl TuiEventContext {
     /// Sets the view that subsequently dispatched actions are attributed to,
     /// returning the previous origin so callers can restore it when leaving the
     /// view's subtree.
-    // Gains a consumer in the element library (slice 03b); dead until then.
-    #[allow(dead_code)]
     pub(crate) fn set_origin_view(&mut self, view_id: Option<EntityId>) -> Option<EntityId> {
         std::mem::replace(&mut self.origin_view_id, view_id)
     }
