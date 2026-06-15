@@ -366,7 +366,7 @@ impl AgentRunDisplayStatus {
                     return Self::from_task_state(task);
                 }
                 let history_model = BlocklistAIHistoryModel::as_ref(app);
-                orchestration_topology::conversation_id_shadowed_by_task(task, history_model)
+                orchestration_topology::local_conversation_id_for_task(task, history_model)
                     .and_then(|conversation_id| history_model.conversation(&conversation_id))
                     .map(|conversation| Self::from_conversation_status(conversation.status()))
                     .unwrap_or_else(|| Self::from_task_state(task))
@@ -1482,7 +1482,7 @@ impl AgentConversationsModel {
 
         let conversation_id = history_model.find_conversation_id_by_server_token(server_token)?;
         if let Some(task) = self.tasks.values().find(|task| {
-            orchestration_topology::conversation_id_shadowed_by_task(task, history_model)
+            orchestration_topology::local_conversation_id_for_task(task, history_model)
                 == Some(conversation_id)
         }) {
             return Some(entry::entry_for_task(task, &self.tasks, history_model, app));
@@ -1578,10 +1578,8 @@ impl AgentConversationsModel {
             } => {
                 let history_model = BlocklistAIHistoryModel::as_ref(ctx);
                 for task in self.tasks.values_mut() {
-                    if orchestration_topology::conversation_id_shadowed_by_task(
-                        task,
-                        history_model,
-                    ) == Some(*conversation_id)
+                    if orchestration_topology::local_conversation_id_for_task(task, history_model)
+                        == Some(*conversation_id)
                     {
                         task.title = title.clone();
                     }
