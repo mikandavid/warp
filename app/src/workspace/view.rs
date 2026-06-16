@@ -5032,6 +5032,7 @@ impl Workspace {
                     subtitle,
                     window_id,
                     tab_index: tab_index + 1,
+                    color: tab.color(),
                 })
             })
             .collect()

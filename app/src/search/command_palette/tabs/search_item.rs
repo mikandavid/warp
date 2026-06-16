@@ -1,4 +1,5 @@
 use ordered_float::OrderedFloat;
+use pathfinder_color::ColorU;
 use warpui::elements::{ConstrainedBox, Container, Flex, ParentElement, Text};
 use warpui::fonts::{Properties, Weight};
 use warpui::{AppContext, Element, SingletonEntity};
@@ -36,7 +37,16 @@ impl SearchItemTrait for SearchItem {
         highlight_state: ItemHighlightState,
         appearance: &Appearance,
     ) -> Box<dyn Element> {
-        let color = highlight_state.icon_fill(appearance).into_solid();
+        // Tint the leading icon with the tab's color so color-coded tabs are
+        // distinguishable in the switcher, mirroring the tab bar/sidebar. Fall
+        // back to the default icon fill for tabs without a color. Contrast
+        // against the row background is handled by `render_search_item_icon`.
+        let color = match self.tab.color {
+            Some(tab_color) => {
+                ColorU::from(tab_color.to_ansi_color(&appearance.theme().terminal_colors().normal))
+            }
+            None => highlight_state.icon_fill(appearance).into_solid(),
+        };
         render_search_item_icon(appearance, Icon::Navigation, color, highlight_state)
     }
 
@@ -53,8 +63,10 @@ impl SearchItemTrait for SearchItem {
     ) -> Box<dyn Element> {
         let appearance = Appearance::as_ref(app);
 
+        // Lead with the tab's (custom) title so it is the first thing read; keep
+        // the numeric index as a trailing hint for disambiguation.
         let title_text = Text::new_inline(
-            format!("[Tab {}] {}", self.tab.tab_index, self.tab.title),
+            format!("{}  ·  Tab {}", self.tab.title, self.tab.tab_index),
             appearance.ui_font_family(),
             appearance.monospace_font_size(),
         )
