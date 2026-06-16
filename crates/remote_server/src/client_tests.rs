@@ -8,8 +8,9 @@ use crate::proto::{
     client_message, host_scoped_request, notification, run_command_response, server_message,
     session_scoped_request, BundledSkillsSnapshot, ClientMessage, CodebaseIndexStatus,
     CodebaseIndexStatusState, CodebaseIndexStatusUpdated, CodebaseIndexStatusesSnapshot, ErrorCode,
-    GetDiffStateResponse, InitializeResponse, OpenBufferResponse, RunCommandResponse,
-    RunCommandSuccess, ServerMessage, WriteFile,
+    GetDiffStateResponse, GlobalRuleProto, GlobalRulesSnapshot, HomeSkillProto, HomeSkillsSnapshot,
+    InitializeResponse, OpenBufferResponse, RunCommandResponse, RunCommandSuccess, ServerMessage,
+    WriteFile,
 };
 use crate::protocol;
 
@@ -18,6 +19,61 @@ fn unwrap_session_scoped(msg: &ClientMessage) -> &session_scoped_request::Messag
     match &msg.message {
         Some(client_message::Message::SessionScoped(w)) => w.message.as_ref().unwrap(),
         other => panic!("Expected SessionScoped, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn home_context_snapshot_pushes_become_client_events() {
+    let (client_stream, server_stream) = tokio::io::duplex(4096);
+    let (server_read, server_write) = tokio::io::split(server_stream);
+    let (client_read, client_write) = tokio::io::split(client_stream);
+    drop(server_read);
+
+    let executor = executor::Background::default();
+    let (_client, event_rx, _failure_rx, _host_rx) =
+        RemoteServerClient::new(client_read.compat(), client_write.compat_write(), &executor);
+    let mut writer = server_write.compat_write();
+
+    for message in [
+        server_message::Message::HomeSkillsSnapshot(HomeSkillsSnapshot {
+            home_dir: "/home/user".to_string(),
+            skills: vec![HomeSkillProto {
+                path: "/home/user/.agents/skills/test/SKILL.md".to_string(),
+                content: "# test".to_string(),
+                provider: "agents".to_string(),
+            }],
+        }),
+        server_message::Message::GlobalRulesSnapshot(GlobalRulesSnapshot {
+            home_dir: "/home/user".to_string(),
+            rules: vec![GlobalRuleProto {
+                path: "/home/user/.agents/AGENTS.md".to_string(),
+                content: "global".to_string(),
+            }],
+        }),
+    ] {
+        protocol::write_server_message(
+            &mut writer,
+            &ServerMessage {
+                request_id: String::new(),
+                message: Some(message),
+            },
+        )
+        .await
+        .unwrap();
+    }
+    writer.flush().await.unwrap();
+
+    match event_rx.recv().await.unwrap() {
+        ClientEvent::HomeSkillsSnapshotReceived { snapshot } => {
+            assert_eq!(snapshot.skills[0].provider, "agents");
+        }
+        other => panic!("Expected HomeSkillsSnapshotReceived, got {other:?}"),
+    }
+    match event_rx.recv().await.unwrap() {
+        ClientEvent::GlobalRulesSnapshotReceived { snapshot } => {
+            assert_eq!(snapshot.rules[0].content, "global");
+        }
+        other => panic!("Expected GlobalRulesSnapshotReceived, got {other:?}"),
     }
 }
 

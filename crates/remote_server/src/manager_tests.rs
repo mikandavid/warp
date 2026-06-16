@@ -2,8 +2,11 @@ use futures::channel::oneshot;
 use warp_core::SessionId;
 use warpui_core::App;
 
-use super::{HostRequestError, PendingHostRequest, RemoteServerManager};
-use crate::proto::{host_scoped_request, ClientMessage, RipgrepSearchRequest, WriteFile};
+use super::{HostRequestError, PendingHostRequest, RemoteServerManager, RemoteServerManagerEvent};
+use crate::proto::{
+    host_scoped_request, ClientMessage, GlobalRulesSnapshot, HomeSkillsSnapshot,
+    RipgrepSearchRequest, WriteFile,
+};
 use crate::protocol::RequestId;
 use crate::HostId;
 
@@ -42,6 +45,29 @@ fn abort_host_request_removes_pending_request_and_resolves_caller() {
             Err(HostRequestError::Aborted)
         ));
     });
+}
+
+#[test]
+fn home_context_snapshots_are_host_scoped_manager_events() {
+    let host_id = HostId::new("test-host".to_string());
+    for event in [
+        RemoteServerManagerEvent::HomeSkillsSnapshot {
+            host_id: host_id.clone(),
+            snapshot: HomeSkillsSnapshot {
+                home_dir: "/home/user".to_string(),
+                skills: Vec::new(),
+            },
+        },
+        RemoteServerManagerEvent::GlobalRulesSnapshot {
+            host_id,
+            snapshot: GlobalRulesSnapshot {
+                home_dir: "/home/user".to_string(),
+                rules: Vec::new(),
+            },
+        },
+    ] {
+        assert!(event.session_id().is_none());
+    }
 }
 
 #[test]

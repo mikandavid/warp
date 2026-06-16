@@ -3,7 +3,8 @@ use prost::Message;
 use super::*;
 use crate::proto::{
     client_message, server_message, session_scoped_request, BundledSkillProto,
-    BundledSkillsSnapshot, ClientMessage, Initialize, InitializeResponse, ServerMessage,
+    BundledSkillsSnapshot, ClientMessage, GlobalRuleProto, GlobalRulesSnapshot, HomeSkillProto,
+    HomeSkillsSnapshot, Initialize, InitializeResponse, ServerMessage,
 };
 
 #[tokio::test]
@@ -29,6 +30,51 @@ async fn round_trip_client_message() {
     match decoded.message {
         Some(client_message::Message::SessionScoped(_)) => {}
         other => panic!("unexpected message variant: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn round_trip_home_context_snapshots() {
+    for message in [
+        server_message::Message::HomeSkillsSnapshot(HomeSkillsSnapshot {
+            home_dir: "/home/user".to_string(),
+            skills: vec![HomeSkillProto {
+                path: "/home/user/.agents/skills/test/SKILL.md".to_string(),
+                content: "# test".to_string(),
+                provider: "agents".to_string(),
+            }],
+        }),
+        server_message::Message::GlobalRulesSnapshot(GlobalRulesSnapshot {
+            home_dir: "/home/user".to_string(),
+            rules: vec![GlobalRuleProto {
+                path: "/home/user/.agents/AGENTS.md".to_string(),
+                content: "global".to_string(),
+            }],
+        }),
+    ] {
+        let mut buf = Vec::new();
+        write_server_message(
+            &mut buf,
+            &ServerMessage {
+                request_id: String::new(),
+                message: Some(message),
+            },
+        )
+        .await
+        .unwrap();
+
+        let decoded = read_server_message(&mut &buf[..]).await.unwrap();
+        match decoded.message {
+            Some(server_message::Message::HomeSkillsSnapshot(snapshot)) => {
+                assert_eq!(snapshot.home_dir, "/home/user");
+                assert_eq!(snapshot.skills[0].provider, "agents");
+            }
+            Some(server_message::Message::GlobalRulesSnapshot(snapshot)) => {
+                assert_eq!(snapshot.home_dir, "/home/user");
+                assert_eq!(snapshot.rules[0].content, "global");
+            }
+            other => panic!("unexpected message variant: {other:?}"),
+        }
     }
 }
 

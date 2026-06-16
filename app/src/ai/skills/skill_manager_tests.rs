@@ -571,6 +571,28 @@ fn bundled_test_skill(id: &str, description: &str) -> ParsedSkill {
     }
 }
 
+fn remote_test_path(host_id: &HostId, path: &str) -> LocalOrRemotePath {
+    LocalOrRemotePath::Remote(RemotePath::new(
+        host_id.clone(),
+        StandardizedPath::try_new(path).unwrap(),
+    ))
+}
+
+fn make_remote_home_skill(host_id: &HostId, name: &str, content: &str) -> ParsedSkill {
+    ParsedSkill {
+        name: name.to_string(),
+        description: format!("{name} remote home skill"),
+        path: remote_test_path(
+            host_id,
+            format!("/home/user/.agents/skills/{name}/SKILL.md").as_str(),
+        ),
+        content: content.to_string(),
+        line_range: None,
+        provider: SkillProvider::Agents,
+        scope: SkillScope::Home,
+    }
+}
+
 fn make_remote_skill(host_id: &HostId, name: &str) -> ParsedSkill {
     ParsedSkill {
         name: name.to_string(),
@@ -946,6 +968,85 @@ fn active_skill_by_reference_distinguishes_remote_hosts_with_the_same_display_pa
             )
         });
         assert_eq!(resolved, (Some(first_path), Some(second_path)));
+    });
+}
+
+#[test]
+fn remote_home_skills_are_host_scoped_replaceable_and_path_invokable() {
+    let first_host = HostId::new("first-host".to_string());
+    let second_host = HostId::new("second-host".to_string());
+    let first_skill = make_remote_home_skill(&first_host, "deploy", "first host content");
+    let second_skill = make_remote_home_skill(&second_host, "deploy", "second host content");
+    let first_reference = SkillReference::Path(first_skill.path.clone());
+    let second_reference = SkillReference::Path(second_skill.path.clone());
+    let first_cwd = remote_test_path(&first_host, "/work/repo");
+    let second_cwd = remote_test_path(&second_host, "/other/repo");
+
+    App::test((), |mut app| async move {
+        app.add_singleton_model(DirectoryWatcher::new);
+        app.add_singleton_model(AISettings::new_with_defaults);
+        app.add_singleton_model(|_| DetectedRepositories::default());
+        app.add_singleton_model(RepoMetadataModel::new);
+        app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
+        app.add_singleton_model(WarpManagedPathsWatcher::new_for_testing);
+        let handle = app.add_singleton_model(SkillManager::new);
+
+        handle.update(&mut app, |manager, _| {
+            manager.set_remote_home_skills(
+                first_host.clone(),
+                remote_test_path(&first_host, "/home/user"),
+                vec![first_skill],
+            );
+            manager.set_remote_home_skills(
+                second_host.clone(),
+                remote_test_path(&second_host, "/home/user"),
+                vec![second_skill],
+            );
+        });
+
+        for (cwd, expected_content, reference) in [
+            (&first_cwd, "first host content", &first_reference),
+            (&second_cwd, "second host content", &second_reference),
+        ] {
+            let descriptors = handle.read(&app, |manager, ctx| {
+                manager.get_skills_for_working_directory(Some(cwd), ctx)
+            });
+            assert_eq!(
+                descriptors
+                    .iter()
+                    .filter(|skill| skill.name == "deploy")
+                    .count(),
+                1
+            );
+            assert_eq!(
+                handle.read(&app, |manager, ctx| {
+                    manager
+                        .active_skill_by_reference(reference, ctx)
+                        .map(|skill| skill.content.clone())
+                }),
+                Some(expected_content.to_string())
+            );
+        }
+
+        assert!(handle
+            .read(&app, |manager, ctx| manager
+                .get_skills_for_working_directory(None, ctx))
+            .iter()
+            .all(|skill| skill.name != "deploy"));
+
+        handle.update(&mut app, |manager, _| {
+            manager.set_remote_home_skills(
+                first_host.clone(),
+                remote_test_path(&first_host, "/home/user"),
+                Vec::new(),
+            );
+        });
+        assert!(handle.read(&app, |manager, ctx| manager
+            .active_skill_by_reference(&first_reference, ctx)
+            .is_none()));
+        assert!(handle.read(&app, |manager, ctx| manager
+            .active_skill_by_reference(&second_reference, ctx)
+            .is_some()));
     });
 }
 

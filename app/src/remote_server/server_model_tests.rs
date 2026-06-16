@@ -6,8 +6,9 @@ use warpui::App;
 
 use super::super::diff_state_tracker::RemoteDiffStateManager;
 use super::super::proto::{
-    server_message, write_file_response, Authenticate, BundledSkillProto, Initialize,
-    ServerMessage, WriteFileResponse, WriteFileSuccess,
+    server_message, write_file_response, Authenticate, BundledSkillProto, GlobalRuleProto,
+    GlobalRulesSnapshot, HomeSkillProto, HomeSkillsSnapshot, Initialize, ServerMessage,
+    WriteFileResponse, WriteFileSuccess,
 };
 use super::super::protocol::RequestId;
 use super::super::server_buffer_tracker::ServerBufferTracker;
@@ -25,6 +26,16 @@ fn test_model(app: &mut App) -> ServerModel {
         host_id: "test-host-id".to_string(),
         bundled_skills: None,
         bundled_skills_sent: HashSet::new(),
+        home_skills: HomeSkillsSnapshot {
+            home_dir: "/home/user".to_string(),
+            skills: Vec::new(),
+        },
+        home_skills_sent: HashSet::new(),
+        global_rules: GlobalRulesSnapshot {
+            home_dir: "/home/user".to_string(),
+            rules: Vec::new(),
+        },
+        global_rules_sent: HashSet::new(),
         executors: HashMap::new(),
         pending_file_ops: PendingFileOps::new(),
         auth_state: Arc::new(AuthState::new_logged_out_for_test()),
@@ -138,6 +149,56 @@ fn initialize_after_broadcast_does_not_resend_bundled_skills() {
         ));
         model.send_bundled_skills_snapshot_to_connection(late_conn);
         assert!(late_rx.try_recv().is_err());
+    });
+}
+
+#[test]
+fn home_context_snapshots_broadcast_replacements_and_initialize_once() {
+    App::test((), |mut app| async move {
+        let mut model = test_model(&mut app);
+        let conn = uuid::Uuid::new_v4();
+        let (tx, rx) = async_channel::unbounded();
+        model.connection_senders.insert(conn, tx);
+
+        model.send_home_skills_snapshot_to_connection(conn);
+        model.send_global_rules_snapshot_to_connection(conn);
+        assert!(matches!(
+            rx.try_recv().map(|msg| msg.message),
+            Ok(Some(server_message::Message::HomeSkillsSnapshot(_)))
+        ));
+        assert!(matches!(
+            rx.try_recv().map(|msg| msg.message),
+            Ok(Some(server_message::Message::GlobalRulesSnapshot(_)))
+        ));
+
+        model.send_home_skills_snapshot_to_connection(conn);
+        model.send_global_rules_snapshot_to_connection(conn);
+        assert!(rx.try_recv().is_err());
+
+        model.home_skills.skills = vec![HomeSkillProto {
+            path: "/home/user/.agents/skills/test/SKILL.md".to_string(),
+            content: "# test".to_string(),
+            provider: "agents".to_string(),
+        }];
+        model.global_rules.rules = vec![GlobalRuleProto {
+            path: "/home/user/.agents/AGENTS.md".to_string(),
+            content: "global".to_string(),
+        }];
+        model.broadcast_home_skills_snapshot();
+        model.broadcast_global_rules_snapshot();
+
+        match rx.try_recv().expect("home skill replacement").message {
+            Some(server_message::Message::HomeSkillsSnapshot(snapshot)) => {
+                assert_eq!(snapshot.skills.len(), 1);
+            }
+            other => panic!("expected HomeSkillsSnapshot, got {other:?}"),
+        }
+        match rx.try_recv().expect("global rule replacement").message {
+            Some(server_message::Message::GlobalRulesSnapshot(snapshot)) => {
+                assert_eq!(snapshot.rules.len(), 1);
+            }
+            other => panic!("expected GlobalRulesSnapshot, got {other:?}"),
+        }
     });
 }
 

@@ -7,7 +7,10 @@ pub use telemetry::{SkillOpenOrigin, SkillTelemetryEvent};
 #[cfg(all(not(target_family = "wasm"), feature = "local_fs"))]
 mod remote;
 #[cfg(all(not(target_family = "wasm"), feature = "local_fs"))]
-pub(crate) use remote::{bundled_skills_snapshot_protos, wire_remote_bundled_skills};
+pub(crate) use remote::{
+    bundled_skills_snapshot_protos, global_rules_snapshot, home_skills_snapshot,
+    wire_remote_home_context,
+};
 #[cfg(feature = "local_fs")]
 mod bundled;
 #[cfg(all(not(target_family = "wasm"), feature = "local_fs"))]
@@ -23,6 +26,9 @@ cfg_if::cfg_if! {
 }
 
 pub use ai::skills::SkillReference;
+pub enum SkillManagerEvent {
+    HomeSkillsChanged,
+}
 
 #[cfg(not(target_family = "wasm"))]
 mod global_skills;

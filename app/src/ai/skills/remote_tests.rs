@@ -131,3 +131,61 @@ fn bundled_skill_from_protos_builds_host_scoped_catalog() {
     assert!(catalog.skill("unknown-mcp-skill").is_none());
     assert!(catalog.skill("bad-path-skill").is_none());
 }
+
+#[test]
+fn home_context_snapshots_validate_home_paths_and_parse_remote_identity() {
+    let host_id = HostId::new("remote-host".to_string());
+    let skills_snapshot = HomeSkillsSnapshot {
+        home_dir: "/home/user".to_string(),
+        skills: vec![
+            HomeSkillProto {
+                path: "/home/user/.agents/skills/test/SKILL.md".to_string(),
+                content: "---\nname: test\n---\nbody".to_string(),
+                provider: "agents".to_string(),
+            },
+            HomeSkillProto {
+                path: "/repo/.agents/skills/project/SKILL.md".to_string(),
+                content: "# project".to_string(),
+                provider: "agents".to_string(),
+            },
+            HomeSkillProto {
+                path: "/home/user/.new-provider/skills/new/SKILL.md".to_string(),
+                content: "# new".to_string(),
+                provider: "unknown".to_string(),
+            },
+        ],
+    };
+
+    let (home_dir, skills) = home_skills_from_snapshot(&host_id, &skills_snapshot).unwrap();
+    assert_eq!(
+        home_dir,
+        LocalOrRemotePath::Remote(RemotePath::new(
+            host_id.clone(),
+            StandardizedPath::try_new("/home/user").unwrap(),
+        ))
+    );
+    assert_eq!(skills.len(), 1);
+    assert_eq!(skills[0].name, "test");
+    assert_eq!(skills[0].scope, SkillScope::Home);
+    assert!(matches!(skills[0].path, LocalOrRemotePath::Remote(_)));
+
+    let rules = global_rules_from_snapshot(
+        &host_id,
+        &GlobalRulesSnapshot {
+            home_dir: "/home/user".to_string(),
+            rules: vec![
+                GlobalRuleProto {
+                    path: "/home/user/.agents/AGENTS.md".to_string(),
+                    content: "global".to_string(),
+                },
+                GlobalRuleProto {
+                    path: "/repo/AGENTS.md".to_string(),
+                    content: "project".to_string(),
+                },
+            ],
+        },
+    )
+    .unwrap();
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].content, "global");
+}

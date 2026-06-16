@@ -10,6 +10,7 @@ use ::ai::index::full_source_code_embedding::manager::{
 use ::ai::index::full_source_code_embedding::{
     ContentHash, FragmentMetadata as LocalFragmentMetadata, NodeHash,
 };
+use ::ai::project_context::model::{ProjectContextModel, ProjectContextModelEvent};
 use remote_server::proto::OpenBufferSuccess;
 use repo_metadata::repositories::{DetectedRepositories, RepoDetectionSource};
 use repo_metadata::{RepoMetadataEvent, RepoMetadataModel, RepositoryIdentifier};
@@ -53,11 +54,11 @@ use super::proto::{
     GitGenerateCommitMessageRequest, GitGenerateCommitMessageResponse,
     GitGetCommittedBranchFilesRequest, GitGetCommittedBranchFilesResponse,
     GitGetCommittedBranchFilesSuccess, GitHubPrInfoPush, GitHubRepositoryInfoPush, GitOpDelta,
-    GitOpError, GitPushRequest, GitPushResponse, GitStatusPush, IndexCodebase, Initialize,
-    InitializeResponse, MissingFragmentMetadata, NavigatedToDirectory,
-    NavigatedToDirectoryResponse, OpenBuffer, OpenBufferResponse, ReadFileContextResponse,
-    ResolveConflict, ResolveConflictResponse, ResolveConflictSuccess, ResyncCodebase,
-    RipgrepSearchRequest, RunCommandError, RunCommandErrorCode, RunCommandRequest,
+    GitOpError, GitPushRequest, GitPushResponse, GitStatusPush, GlobalRulesSnapshot,
+    HomeSkillsSnapshot, IndexCodebase, Initialize, InitializeResponse, MissingFragmentMetadata,
+    NavigatedToDirectory, NavigatedToDirectoryResponse, OpenBuffer, OpenBufferResponse,
+    ReadFileContextResponse, ResolveConflict, ResolveConflictResponse, ResolveConflictSuccess,
+    ResyncCodebase, RipgrepSearchRequest, RunCommandError, RunCommandErrorCode, RunCommandRequest,
     RunCommandResponse, RunCommandSuccess, SaveBuffer, SaveBufferResponse, SaveBufferSuccess,
     ServerMessage, SessionBootstrapped, TextEdit, UpdateGitHubPrInfo, UpdateGitHubRepoInfo,
     UpdateGitStatus, UploadHandoffSnapshot, WriteFile, WriteFileResponse, WriteFileSuccess,
@@ -86,7 +87,10 @@ use super::protocol::RequestId;
 use crate::ai::agent::FileLocations;
 use crate::ai::blocklist::handoff::snapshot::upload_result_to_proto;
 use crate::ai::blocklist::{read_local_file_context, ReadFileContextResult};
-use crate::ai::skills::{bundled_skills_snapshot_protos, BundledSkill};
+use crate::ai::skills::{
+    bundled_skills_snapshot_protos, global_rules_snapshot, home_skills_snapshot, BundledSkill,
+    SkillManager, SkillManagerEvent,
+};
 use crate::auth::auth_state::{AuthState, AuthStateProvider};
 use crate::code_review::git_actions;
 use crate::features::FeatureFlag;
@@ -261,6 +265,14 @@ pub struct ServerModel {
     /// completes between a connection registering its sender and its
     /// `Initialize` being handled.
     bundled_skills_sent: HashSet<ConnectionId>,
+    /// Latest full replacement snapshot of daemon-host home skills.
+    home_skills: HomeSkillsSnapshot,
+    /// Connections that have already received the current home-skills stream.
+    home_skills_sent: HashSet<ConnectionId>,
+    /// Latest full replacement snapshot of daemon-host file-based global rules.
+    global_rules: GlobalRulesSnapshot,
+    /// Connections that have already received the current global-rules stream.
+    global_rules_sent: HashSet<ConnectionId>,
     /// Per-session command executors created from `SessionBootstrapped` notifications.
     executors: HashMap<SessionId, Arc<LocalCommandExecutor>>,
     /// Tracks in-flight file write/delete operations and handles cleanup.
@@ -311,6 +323,8 @@ impl ServerModel {
             std::process::id(),
             host_id
         );
+        let home_skills = home_skills_snapshot(ctx);
+        let global_rules = global_rules_snapshot(ctx);
         let mut model = Self {
             connection_senders: HashMap::new(),
             snapshot_sent_roots_by_connection: HashMap::new(),
@@ -319,6 +333,10 @@ impl ServerModel {
             host_id,
             bundled_skills: None,
             bundled_skills_sent: HashSet::new(),
+            home_skills,
+            home_skills_sent: HashSet::new(),
+            global_rules,
+            global_rules_sent: HashSet::new(),
             executors: HashMap::new(),
             pending_file_ops: PendingFileOps::new(),
             auth_state: AuthStateProvider::as_ref(ctx).get().clone(),
@@ -648,6 +666,26 @@ impl ServerModel {
                 }
             });
         }
+        {
+            let skill_manager = SkillManager::handle(ctx);
+            ctx.subscribe_to_model(&skill_manager, |me, event, ctx| match event {
+                SkillManagerEvent::HomeSkillsChanged => {
+                    me.home_skills = home_skills_snapshot(ctx);
+                    me.broadcast_home_skills_snapshot();
+                }
+            });
+        }
+        {
+            let project_context = ProjectContextModel::handle(ctx);
+            ctx.subscribe_to_model(&project_context, |me, event, ctx| match event {
+                ProjectContextModelEvent::GlobalRulesChanged(_) => {
+                    me.global_rules = global_rules_snapshot(ctx);
+                    me.broadcast_global_rules_snapshot();
+                }
+                ProjectContextModelEvent::PathIndexed
+                | ProjectContextModelEvent::KnownRulesChanged(_) => {}
+            });
+        }
         // Subscribe to diff state manager events — convert domain dispatches
         // to proto messages and send them to connected clients.
         {
@@ -722,6 +760,50 @@ impl ServerModel {
         self.bundled_skills_sent.insert(conn_id);
     }
 
+    fn broadcast_home_skills_snapshot(&mut self) {
+        self.send_server_message(
+            None,
+            None,
+            server_message::Message::HomeSkillsSnapshot(self.home_skills.clone()),
+        );
+        self.home_skills_sent
+            .extend(self.connection_senders.keys().copied());
+    }
+
+    fn send_home_skills_snapshot_to_connection(&mut self, conn_id: ConnectionId) {
+        if self.home_skills_sent.contains(&conn_id) {
+            return;
+        }
+        self.send_server_message(
+            Some(conn_id),
+            None,
+            server_message::Message::HomeSkillsSnapshot(self.home_skills.clone()),
+        );
+        self.home_skills_sent.insert(conn_id);
+    }
+
+    fn broadcast_global_rules_snapshot(&mut self) {
+        self.send_server_message(
+            None,
+            None,
+            server_message::Message::GlobalRulesSnapshot(self.global_rules.clone()),
+        );
+        self.global_rules_sent
+            .extend(self.connection_senders.keys().copied());
+    }
+
+    fn send_global_rules_snapshot_to_connection(&mut self, conn_id: ConnectionId) {
+        if self.global_rules_sent.contains(&conn_id) {
+            return;
+        }
+        self.send_server_message(
+            Some(conn_id),
+            None,
+            server_message::Message::GlobalRulesSnapshot(self.global_rules.clone()),
+        );
+        self.global_rules_sent.insert(conn_id);
+    }
+
     /// Called when a proxy connects.  Inserts `conn_tx` into the connection
     /// map so `send_server_message` can route responses to this proxy, and
     /// cancels the grace timer if it was running.
@@ -750,6 +832,8 @@ impl ServerModel {
     pub fn deregister_connection(&mut self, conn_id: ConnectionId, ctx: &mut ModelContext<Self>) {
         self.snapshot_sent_roots_by_connection.remove(&conn_id);
         self.bundled_skills_sent.remove(&conn_id);
+        self.home_skills_sent.remove(&conn_id);
+        self.global_rules_sent.remove(&conn_id);
         // Guard against double-deregister (reader and writer tasks both call
         // this on connection close; the second call must be a safe no-op).
         if self.connection_senders.remove(&conn_id).is_none() {
@@ -1600,6 +1684,8 @@ impl ServerModel {
         // channel as the response below, so the client buffers it as a push
         // event during the handshake.
         self.send_bundled_skills_snapshot_to_connection(conn_id);
+        self.send_home_skills_snapshot_to_connection(conn_id);
+        self.send_global_rules_snapshot_to_connection(conn_id);
 
         let server_version = ChannelState::app_version().unwrap_or("").to_string();
         HandlerOutcome::Sync(server_message::Message::InitializeResponse(

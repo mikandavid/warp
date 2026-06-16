@@ -284,6 +284,8 @@ fn client_event_kind(event: &ClientEvent) -> &'static str {
         ClientEvent::DiffStateMetadataUpdateReceived { .. } => "diff_state_metadata_update",
         ClientEvent::DiffStateFileDeltaReceived { .. } => "diff_state_file_delta",
         ClientEvent::BundledSkillsSnapshotReceived { .. } => "bundled_skills_snapshot",
+        ClientEvent::HomeSkillsSnapshotReceived { .. } => "home_skills_snapshot",
+        ClientEvent::GlobalRulesSnapshotReceived { .. } => "global_rules_snapshot",
         ClientEvent::GitStatusPushReceived { .. } => "git_status_push",
         ClientEvent::GitHubPrInfoPushReceived { .. } => "github_pr_info_push",
         ClientEvent::GitHubRepositoryInfoPushReceived { .. } => "github_repository_info_push",
@@ -473,6 +475,16 @@ pub enum RemoteServerManagerEvent {
     BundledSkillsSnapshot {
         host_id: HostId,
         skills: Vec<crate::proto::BundledSkillProto>,
+    },
+    /// A full replacement snapshot of the daemon host's home skills.
+    HomeSkillsSnapshot {
+        host_id: HostId,
+        snapshot: crate::proto::HomeSkillsSnapshot,
+    },
+    /// A full replacement snapshot of the daemon host's file-based global rules.
+    GlobalRulesSnapshot {
+        host_id: HostId,
+        snapshot: crate::proto::GlobalRulesSnapshot,
     },
 
     // --- Repo metadata events (forwarded from ClientEvent push channel) ---
@@ -701,6 +713,8 @@ impl RemoteServerManagerEvent {
             RemoteServerManagerEvent::HostConnected { .. }
             | RemoteServerManagerEvent::HostDisconnected { .. }
             | RemoteServerManagerEvent::BundledSkillsSnapshot { .. }
+            | RemoteServerManagerEvent::HomeSkillsSnapshot { .. }
+            | RemoteServerManagerEvent::GlobalRulesSnapshot { .. }
             | RemoteServerManagerEvent::RepoMetadataSnapshot { .. }
             | RemoteServerManagerEvent::RepoMetadataUpdated { .. }
             | RemoteServerManagerEvent::RepoMetadataDirectoryLoaded { .. }
@@ -3515,6 +3529,12 @@ impl RemoteServerManager {
             }
             ClientEvent::BundledSkillsSnapshotReceived { skills } => {
                 ctx.emit(RemoteServerManagerEvent::BundledSkillsSnapshot { host_id, skills });
+            }
+            ClientEvent::HomeSkillsSnapshotReceived { snapshot } => {
+                ctx.emit(RemoteServerManagerEvent::HomeSkillsSnapshot { host_id, snapshot });
+            }
+            ClientEvent::GlobalRulesSnapshotReceived { snapshot } => {
+                ctx.emit(RemoteServerManagerEvent::GlobalRulesSnapshot { host_id, snapshot });
             }
             ClientEvent::GitStatusPushReceived {
                 repo_path,

@@ -170,6 +170,8 @@ impl Sessions {
                 | RemoteServerManagerEvent::HostConnected { .. }
                 | RemoteServerManagerEvent::HostDisconnected { .. }
                 | RemoteServerManagerEvent::BundledSkillsSnapshot { .. }
+                | RemoteServerManagerEvent::HomeSkillsSnapshot { .. }
+                | RemoteServerManagerEvent::GlobalRulesSnapshot { .. }
                 | RemoteServerManagerEvent::NavigatedToDirectory { .. }
                 | RemoteServerManagerEvent::RepoMetadataSnapshot { .. }
                 | RemoteServerManagerEvent::RepoMetadataUpdated { .. }

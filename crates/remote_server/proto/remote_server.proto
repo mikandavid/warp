@@ -125,6 +125,8 @@ message ServerMessage {
     GitHubPrInfoPush github_pr_info_push = 35;
     GitHubRepositoryInfoPush github_repository_info_push = 36;
     RipgrepSearchResponse ripgrep_search_response = 37;
+    HomeSkillsSnapshot home_skills_snapshot = 38;
+    GlobalRulesSnapshot global_rules_snapshot = 39;
   }
 }
 
@@ -271,6 +273,30 @@ message BundledSkillProto {
 // Never blocks the initialize handshake.
 message BundledSkillsSnapshot {
   repeated BundledSkillProto skills = 1;
+}
+
+// Full replacement snapshot of file-based skills in the daemon host's home
+// directory.
+message HomeSkillsSnapshot {
+  string home_dir = 1;
+  repeated HomeSkillProto skills = 2;
+}
+
+message HomeSkillProto {
+  string path = 1;
+  string content = 2;
+  string provider = 3;
+}
+
+// Full replacement snapshot of file-based global rules on the daemon host.
+message GlobalRulesSnapshot {
+  string home_dir = 1;
+  repeated GlobalRuleProto rules = 2;
+}
+
+message GlobalRuleProto {
+  string path = 1;
+  string content = 2;
 }
 
 // ── Shared repo metadata sub-messages ─────────────────────────────

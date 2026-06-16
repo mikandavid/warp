@@ -1,6 +1,9 @@
-use ai::skills::{parse_skill_content_at_location, SkillProvider, SkillScope};
+use ::ai::project_context::model::{ProjectContextModel, ProjectRule};
+use ai::skills::{parse_skill_content_at_location, ParsedSkill, SkillProvider, SkillScope};
 use remote_server::manager::{RemoteServerManager, RemoteServerManagerEvent};
-use remote_server::proto::BundledSkillProto;
+use remote_server::proto::{
+    BundledSkillProto, GlobalRuleProto, GlobalRulesSnapshot, HomeSkillProto, HomeSkillsSnapshot,
+};
 use warp_core::features::FeatureFlag;
 use warp_core::safe_warn;
 use warp_util::host_id::HostId;
@@ -13,16 +16,16 @@ use super::bundled::{BundledSkill, BundledSkillActivation};
 use super::SkillManager;
 use crate::ai::mcp::McpIntegration;
 
-pub(crate) fn wire_remote_bundled_skills(ctx: &mut AppContext) {
+pub(crate) fn wire_remote_home_context(ctx: &mut AppContext) {
     SkillManager::handle(ctx).update(ctx, |manager, ctx| {
-        manager.subscribe_to_remote_bundled_skills(ctx);
+        manager.subscribe_to_remote_home_context(ctx);
     });
 }
 
 impl SkillManager {
-    fn subscribe_to_remote_bundled_skills(&mut self, ctx: &mut ModelContext<Self>) {
+    fn subscribe_to_remote_home_context(&mut self, ctx: &mut ModelContext<Self>) {
         let remote_server_manager = RemoteServerManager::handle(ctx);
-        ctx.subscribe_to_model(&remote_server_manager, |me, event, _ctx| match event {
+        ctx.subscribe_to_model(&remote_server_manager, |me, event, ctx| match event {
             RemoteServerManagerEvent::BundledSkillsSnapshot { host_id, skills } => {
                 if !FeatureFlag::BundledSkills.is_enabled() {
                     return;
@@ -34,8 +37,24 @@ impl SkillManager {
                     bundled_skill_from_protos(host_id, skills),
                 );
             }
+            RemoteServerManagerEvent::HomeSkillsSnapshot { host_id, snapshot } => {
+                if let Some((home_dir, skills)) = home_skills_from_snapshot(host_id, snapshot) {
+                    me.set_remote_home_skills(host_id.clone(), home_dir, skills);
+                }
+            }
+            RemoteServerManagerEvent::GlobalRulesSnapshot { host_id, snapshot } => {
+                if let Some(rules) = global_rules_from_snapshot(host_id, snapshot) {
+                    ProjectContextModel::handle(ctx).update(ctx, |model, _| {
+                        model.set_remote_global_rules(host_id.clone(), rules);
+                    });
+                }
+            }
             RemoteServerManagerEvent::HostDisconnected { host_id } => {
                 me.remove_remote_bundled_skill(host_id);
+                me.remove_remote_home_skills(host_id);
+                ProjectContextModel::handle(ctx).update(ctx, |model, _| {
+                    model.remove_remote_global_rules(host_id);
+                });
             }
             RemoteServerManagerEvent::SessionConnecting { .. }
             | RemoteServerManagerEvent::SessionConnected { .. }
@@ -72,6 +91,129 @@ impl SkillManager {
             | RemoteServerManagerEvent::ServerMessageDecodingError { .. } => {}
         });
     }
+}
+
+fn skill_provider_wire_id(provider: SkillProvider) -> &'static str {
+    match provider {
+        SkillProvider::Warp => "warp",
+        SkillProvider::Agents => "agents",
+        SkillProvider::Claude => "claude",
+        SkillProvider::Codex => "codex",
+        SkillProvider::Cursor => "cursor",
+        SkillProvider::Gemini => "gemini",
+        SkillProvider::Copilot => "copilot",
+        SkillProvider::Droid => "droid",
+        SkillProvider::Github => "github",
+        SkillProvider::OpenCode => "opencode",
+    }
+}
+
+fn skill_provider_from_wire_id(wire_id: &str) -> Option<SkillProvider> {
+    match wire_id {
+        "warp" => Some(SkillProvider::Warp),
+        "agents" => Some(SkillProvider::Agents),
+        "claude" => Some(SkillProvider::Claude),
+        "codex" => Some(SkillProvider::Codex),
+        "cursor" => Some(SkillProvider::Cursor),
+        "gemini" => Some(SkillProvider::Gemini),
+        "copilot" => Some(SkillProvider::Copilot),
+        "droid" => Some(SkillProvider::Droid),
+        "github" => Some(SkillProvider::Github),
+        "opencode" => Some(SkillProvider::OpenCode),
+        _ => None,
+    }
+}
+
+fn remote_home_path(host_id: &HostId, home_dir: &str) -> Option<LocalOrRemotePath> {
+    StandardizedPath::try_new(home_dir)
+        .ok()
+        .map(|path| LocalOrRemotePath::Remote(RemotePath::new(host_id.clone(), path)))
+}
+
+fn remote_path_within_home(
+    host_id: &HostId,
+    path: &str,
+    home_dir: &LocalOrRemotePath,
+) -> Option<LocalOrRemotePath> {
+    let path = StandardizedPath::try_new(path).ok()?;
+    let path = LocalOrRemotePath::Remote(RemotePath::new(host_id.clone(), path));
+    path.starts_with(home_dir).then_some(path)
+}
+
+fn home_skills_from_snapshot(
+    host_id: &HostId,
+    snapshot: &HomeSkillsSnapshot,
+) -> Option<(LocalOrRemotePath, Vec<ParsedSkill>)> {
+    let home_dir = remote_home_path(host_id, &snapshot.home_dir)?;
+    let skills = snapshot
+        .skills
+        .iter()
+        .filter_map(|proto| {
+            let provider = skill_provider_from_wire_id(&proto.provider)?;
+            let path = remote_path_within_home(host_id, &proto.path, &home_dir)?;
+            parse_skill_content_at_location(path, &proto.content, provider, SkillScope::Home)
+                .map_err(|error| {
+                    safe_warn!(
+                        safe: ("Skipping remote home skill that failed to parse"),
+                        full: ("Skipping remote home skill that failed to parse: {error:#}")
+                    );
+                })
+                .ok()
+        })
+        .collect();
+    Some((home_dir, skills))
+}
+
+fn global_rules_from_snapshot(
+    host_id: &HostId,
+    snapshot: &GlobalRulesSnapshot,
+) -> Option<Vec<ProjectRule>> {
+    let home_dir = remote_home_path(host_id, &snapshot.home_dir)?;
+    Some(
+        snapshot
+            .rules
+            .iter()
+            .filter_map(|rule| {
+                Some(ProjectRule {
+                    path: remote_path_within_home(host_id, &rule.path, &home_dir)?,
+                    content: rule.content.clone(),
+                })
+            })
+            .collect(),
+    )
+}
+
+pub(crate) fn home_skills_snapshot(ctx: &AppContext) -> HomeSkillsSnapshot {
+    let home_dir = dirs::home_dir()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut skills = SkillManager::as_ref(ctx)
+        .local_home_skills()
+        .into_iter()
+        .map(|skill| HomeSkillProto {
+            path: skill.path.display_path(),
+            content: skill.content,
+            provider: skill_provider_wire_id(skill.provider).to_owned(),
+        })
+        .collect::<Vec<_>>();
+    skills.sort_by(|a, b| a.path.cmp(&b.path));
+    HomeSkillsSnapshot { home_dir, skills }
+}
+
+pub(crate) fn global_rules_snapshot(ctx: &AppContext) -> GlobalRulesSnapshot {
+    let home_dir = dirs::home_dir()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut rules = ProjectContextModel::as_ref(ctx)
+        .local_global_rules()
+        .into_iter()
+        .map(|rule| GlobalRuleProto {
+            path: rule.path.display_path(),
+            content: rule.content,
+        })
+        .collect::<Vec<_>>();
+    rules.sort_by(|a, b| a.path.cmp(&b.path));
+    GlobalRulesSnapshot { home_dir, rules }
 }
 
 /// Stable wire identifier for an MCP integration in [`BundledSkillProto`].

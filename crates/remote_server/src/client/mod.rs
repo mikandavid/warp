@@ -17,10 +17,10 @@ use crate::proto::{
     notification, server_message, session_scoped_request, Abort, Authenticate, BufferEdit,
     BundledSkillProto, ClientMessage, CloseBuffer, CodebaseIndexLimits, DiffMode,
     DiffStateFileDelta, DiffStateMetadataUpdate, DiffStateSnapshot, ErrorCode, GitStatusMetadata,
-    Initialize, InitializeResponse, LoadRepoMetadataDirectoryResponse,
-    NavigatedToDirectoryResponse, PrInfo, RepositoryInfo, RunCommandRequest, RunCommandResponse,
-    ServerMessage, SessionBootstrapped, TextEdit, UnsubscribeDiffState, UpdateGitHubPrInfo,
-    UpdateGitHubRepoInfo, UpdateGitStatus,
+    GlobalRulesSnapshot, HomeSkillsSnapshot, Initialize, InitializeResponse,
+    LoadRepoMetadataDirectoryResponse, NavigatedToDirectoryResponse, PrInfo, RepositoryInfo,
+    RunCommandRequest, RunCommandResponse, ServerMessage, SessionBootstrapped, TextEdit,
+    UnsubscribeDiffState, UpdateGitHubPrInfo, UpdateGitHubRepoInfo, UpdateGitStatus,
 };
 use crate::repo_metadata_proto::{proto_snapshot_to_update, proto_to_repo_metadata_update};
 
@@ -129,6 +129,10 @@ pub enum ClientEvent {
     },
     /// The daemon pushed its pre-parsed bundled skill catalog.
     BundledSkillsSnapshotReceived { skills: Vec<BundledSkillProto> },
+    /// The daemon pushed a full replacement snapshot of its home skills.
+    HomeSkillsSnapshotReceived { snapshot: HomeSkillsSnapshot },
+    /// The daemon pushed a full replacement snapshot of its file-based global rules.
+    GlobalRulesSnapshotReceived { snapshot: GlobalRulesSnapshot },
     /// An aggregate git status push (branch + diff stats) was pushed by the
     /// server for the tab / prompt chips.
     GitStatusPushReceived {
@@ -692,6 +696,12 @@ impl RemoteServerClient {
                 Some(ClientEvent::BundledSkillsSnapshotReceived {
                     skills: snapshot.skills,
                 })
+            }
+            server_message::Message::HomeSkillsSnapshot(snapshot) => {
+                Some(ClientEvent::HomeSkillsSnapshotReceived { snapshot })
+            }
+            server_message::Message::GlobalRulesSnapshot(snapshot) => {
+                Some(ClientEvent::GlobalRulesSnapshotReceived { snapshot })
             }
             server_message::Message::GitStatusPush(push) => {
                 let Some(repo_path) = StandardizedPath::try_new(&push.repo_path).ok() else {
