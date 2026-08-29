@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ctrl+Tab in-place highlighting mockup</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --canvas: #121212;
+        --chrome: #191919;
+        --sidebar: #1c1c1c;
+        --terminal: #101010;
+        --surface-1: #222222;
+        --surface-2: #292929;
+        --text: rgba(250, 249, 246, 0.9);
+        --subtext: rgba(250, 249, 246, 0.58);
+        --muted: rgba(250, 249, 246, 0.38);
+        --line: rgba(250, 249, 246, 0.1);
+        --line-strong: rgba(250, 249, 246, 0.16);
+        --accent: #9c58f0;
+        --green: #52b788;
+        --blue: #78a9ff;
+        --red: #e66b61;
+        --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1400px;
+        height: 900px;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        background: var(--canvas);
+        color: var(--text);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .frame {
+        width: 1280px;
+      }
+
+      .caption {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin: 0 2px 18px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 24px;
+        font-weight: 560;
+        letter-spacing: -0.35px;
+      }
+
+      .caption p {
+        margin: 0;
+        color: var(--subtext);
+        font-size: 14px;
+        letter-spacing: 0.1px;
+      }
+
+      .window {
+        height: 750px;
+        overflow: hidden;
+        border: 1px solid var(--line-strong);
+        border-radius: 12px;
+        background: var(--terminal);
+        box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
+      }
+
+      .titlebar {
+        position: relative;
+        display: flex;
+        height: 44px;
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        background: var(--chrome);
+      }
+
+      .traffic-lights {
+        display: flex;
+        gap: 9px;
+        margin-left: 16px;
+      }
+
+      .traffic-lights span {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: rgba(250, 249, 246, 0.2);
+      }
+
+      .sidebar-toggle {
+        display: grid;
+        width: 27px;
+        height: 27px;
+        margin-left: 18px;
+        place-items: center;
+        border-radius: 5px;
+        background: rgba(250, 249, 246, 0.12);
+      }
+
+      .sidebar-toggle svg {
+        width: 16px;
+        height: 16px;
+        stroke: var(--text);
+      }
+
+      .search {
+        position: absolute;
+        left: 50%;
+        display: flex;
+        width: 370px;
+        height: 28px;
+        align-items: center;
+        gap: 9px;
+        padding: 0 12px;
+        transform: translateX(-50%);
+        border-radius: 6px;
+        background: rgba(250, 249, 246, 0.055);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .search svg {
+        width: 15px;
+        height: 15px;
+        stroke: currentColor;
+      }
+
+      .body {
+        display: grid;
+        height: calc(100% - 44px);
+        grid-template-columns: 278px 1fr;
+      }
+
+      .sidebar {
+        border-right: 1px solid var(--line);
+        background: var(--sidebar);
+      }
+
+      .sidebar-controls {
+        display: grid;
+        height: 47px;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        align-items: center;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .sidebar-button {
+        display: flex;
+        height: 30px;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        color: var(--subtext);
+        font-size: 12px;
+        font-weight: 520;
+      }
+
+      .sidebar-button svg {
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+      }
+
+      .sidebar-content {
+        padding: 12px 10px;
+      }
+
+      .section-label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 5px 8px;
+        color: var(--muted);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.55px;
+        text-transform: uppercase;
+      }
+
+      .tab-shell {
+        position: relative;
+        padding: 7px;
+        border: 1px solid rgba(156, 88, 240, 0.63);
+        background: rgba(250, 249, 246, 0.035);
+      }
+
+      .tab-heading {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        min-height: 27px;
+        padding: 0 4px 7px;
+        color: var(--text);
+        font-size: 12px;
+      }
+
+      .chevron {
+        color: var(--subtext);
+        font-size: 10px;
+      }
+
+      .tab-heading .count {
+        margin-left: auto;
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .pane-row {
+        display: grid;
+        min-height: 55px;
+        grid-template-columns: 24px minmax(0, 1fr);
+        gap: 8px;
+        align-items: center;
+        margin-top: 4px;
+        padding: 7px;
+        border: 1px solid transparent;
+        border-radius: 4px;
+      }
+
+      .pane-row.current {
+        border-color: rgba(250, 249, 246, 0.15);
+        background: rgba(250, 249, 246, 0.045);
+      }
+
+      .pane-row.target {
+        border: 2px solid var(--accent);
+        padding: 6px;
+        background: rgba(156, 88, 240, 0.075);
+      }
+
+      .pane-icon {
+        display: grid;
+        width: 24px;
+        height: 24px;
+        place-items: center;
+        border-radius: 50%;
+        background: rgba(250, 249, 246, 0.1);
+        color: var(--subtext);
+        font-family: var(--mono);
+        font-size: 12px;
+      }
+
+      .pane-copy {
+        min-width: 0;
+      }
+
+      .pane-title,
+      .pane-detail {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .pane-title {
+        color: var(--text);
+        font-size: 12px;
+        line-height: 17px;
+      }
+
+      .pane-detail {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10px;
+        line-height: 15px;
+      }
+
+      .other-tab {
+        display: flex;
+        height: 48px;
+        align-items: center;
+        gap: 9px;
+        margin-top: 10px;
+        padding: 0 12px;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+        color: var(--subtext);
+        font-size: 12px;
+      }
+
+      .other-tab .pane-icon {
+        width: 22px;
+        height: 22px;
+        font-size: 10px;
+      }
+
+      .workspace {
+        position: relative;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        background: var(--terminal);
+      }
+
+      .pane {
+        position: relative;
+        min-width: 0;
+        overflow: hidden;
+        background: var(--terminal);
+      }
+
+      .pane + .pane {
+        border-left: 1px solid var(--line-strong);
+      }
+
+      .pane.target {
+        z-index: 2;
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
+      }
+
+      .pane-header {
+        position: relative;
+        display: flex;
+        height: 34px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 11px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(250, 249, 246, 0.025);
+        color: var(--subtext);
+        font-size: 12px;
+      }
+
+      .active-corner {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 0;
+        height: 0;
+        border-top: 16px solid var(--accent);
+        border-right: 16px solid transparent;
+      }
+
+      .pane-header .tools {
+        color: var(--muted);
+        font-size: 15px;
+        letter-spacing: 4px;
+      }
+
+      .terminal-content {
+        padding: 25px 24px;
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1.65;
+      }
+
+      .command-block {
+        margin-bottom: 23px;
+      }
+
+      .prompt-line {
+        color: var(--text);
+      }
+
+      .path {
+        color: var(--blue);
+      }
+
+      .branch {
+        color: var(--green);
+      }
+
+      .output {
+        margin-top: 7px;
+        color: var(--subtext);
+      }
+
+      .success {
+        color: var(--green);
+      }
+
+      .cursor-line {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+      }
+
+      .cursor {
+        width: 2px;
+        height: 17px;
+        background: var(--accent);
+      }
+
+    </style>
+  </head>
+  <body>
+    <main class="frame">
+      <header class="caption">
+        <h1>Ctrl+Tab — Highlighting</h1>
+        <p>One in-place target. No switcher popup.</p>
+      </header>
+
+      <section class="window" aria-label="Warp window with a highlighted Ctrl+Tab target">
+        <div class="titlebar">
+          <div class="traffic-lights" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="sidebar-toggle" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none">
+              <rect x="1.5" y="1.5" width="13" height="13" rx="2" stroke-width="1.3" />
+              <path d="M5.2 2v12" stroke-width="1.3" />
+            </svg>
+          </div>
+          <div class="search">
+            <svg viewBox="0 0 16 16" fill="none">
+              <circle cx="7" cy="7" r="4.5" stroke-width="1.4" />
+              <path d="m10.5 10.5 3 3" stroke-width="1.4" stroke-linecap="round" />
+            </svg>
+            <span>Search sessions, agents, files...</span>
+          </div>
+        </div>
+
+        <div class="body">
+          <aside class="sidebar">
+            <div class="sidebar-controls">
+              <div class="sidebar-button">
+                <svg viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h12M2 12h12" stroke-width="1.4" stroke-linecap="round" /></svg>
+                <span>Condense view</span>
+              </div>
+              <div class="sidebar-button">
+                <svg viewBox="0 0 16 16" fill="none"><path d="M8 2v12M2 8h12" stroke-width="1.4" stroke-linecap="round" /></svg>
+                <span>New tab</span>
+              </div>
+            </div>
+
+            <div class="sidebar-content">
+              <div class="section-label"><span>Sessions</span><span>2 tabs</span></div>
+
+              <div class="tab-shell">
+                <div class="tab-heading">
+                  <span class="chevron">⌄</span>
+                  <span>warp · feature/tab-cycling</span>
+                  <span class="count">4 panes</span>
+                </div>
+
+                <div class="pane-row current">
+                  <div class="pane-icon">›_</div>
+                  <div class="pane-copy">
+                    <div class="pane-title">Codex · UI implementation</div>
+                    <div class="pane-detail">~/projects/warp</div>
+                  </div>
+                </div>
+
+                <div class="pane-row target">
+                  <div class="pane-icon">›_</div>
+                  <div class="pane-copy">
+                    <div class="pane-title">Codex · test review</div>
+                    <div class="pane-detail">~/projects/warp</div>
+                  </div>
+                </div>
+
+                <div class="pane-row">
+                  <div class="pane-icon">›_</div>
+                  <div class="pane-copy">
+                    <div class="pane-title">Dev server</div>
+                    <div class="pane-detail">localhost:3000</div>
+                  </div>
+                </div>
+
+                <div class="pane-row">
+                  <div class="pane-icon">›_</div>
+                  <div class="pane-copy">
+                    <div class="pane-title">Git</div>
+                    <div class="pane-detail">feature/tab-cycling</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="other-tab">
+                <div class="pane-icon">›_</div>
+                <div>
+                  <div class="pane-title">docs · active-pane-indicator</div>
+                  <div class="pane-detail">2 panes</div>
+                </div>
+              </div>
+            </div>
+          </aside>
+
+          <section class="workspace">
+            <article class="pane">
+              <header class="pane-header">
+                <span class="active-corner" aria-hidden="true"></span>
+                <span>Codex · UI implementation</span>
+                <span class="tools">···</span>
+              </header>
+              <div class="terminal-content">
+                <div class="command-block">
+                  <div class="prompt-line"><span class="path">~/projects/warp</span> <span class="branch">feature/tab-cycling</span> % cargo check -p warp --lib</div>
+                  <div class="output">Checking warp v0.1.0</div>
+                  <div class="output success">Finished dev profile in 1m 55s</div>
+                </div>
+                <div class="command-block">
+                  <div class="prompt-line"><span class="path">~/projects/warp</span> <span class="branch">feature/tab-cycling</span> % git diff --stat</div>
+                  <div class="output">app/src/workspace/view.rs&nbsp;&nbsp;| 84 +++++++++++++++++</div>
+                  <div class="output">app/src/tab.rs&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;| 16 +++</div>
+                </div>
+                <div class="cursor-line"><span class="cursor"></span><span>Run a command...</span></div>
+              </div>
+            </article>
+
+            <article class="pane target">
+              <header class="pane-header">
+                <span>Codex · test review</span>
+                <span class="tools">···</span>
+              </header>
+              <div class="terminal-content">
+                <div class="command-block">
+                  <div class="prompt-line"><span class="path">~/projects/warp</span> <span class="branch">feature/tab-cycling</span> % cargo nextest run -p integration</div>
+                  <div class="output">Starting 1 test across 1 binary</div>
+                  <div class="output success">PASS test_ctrl_tab_highlighting_order</div>
+                </div>
+                <div class="command-block">
+                  <div class="prompt-line"><span class="path">~/projects/warp</span> <span class="branch">feature/tab-cycling</span> %</div>
+                </div>
+              </div>
+            </article>
+          </section>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
