@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Active pane accent title mockup</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --canvas: #121212;
+        --chrome: #191919;
+        --terminal: #101010;
+        --surface-1: #202020;
+        --surface-2: #292929;
+        --text: rgba(250, 249, 246, 0.9);
+        --subtext: rgba(250, 249, 246, 0.58);
+        --muted: rgba(250, 249, 246, 0.38);
+        --line: rgba(250, 249, 246, 0.1);
+        --line-strong: rgba(250, 249, 246, 0.16);
+        --accent: #9c58f0;
+        --green: #52b788;
+        --blue: #78a9ff;
+        --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        --mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1400px;
+        height: 900px;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        background: var(--canvas);
+        color: var(--text);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      main {
+        width: 1280px;
+      }
+
+      h1 {
+        margin: 0 0 18px 2px;
+        font-size: 24px;
+        font-weight: 560;
+        letter-spacing: -0.35px;
+      }
+
+      .comparison {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 22px;
+      }
+
+      .state-label {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin: 0 2px 9px;
+      }
+
+      .state-label strong {
+        font-size: 14px;
+        font-weight: 560;
+      }
+
+      .state-label span {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .window {
+        height: 546px;
+        overflow: hidden;
+        border: 1px solid var(--line-strong);
+        border-radius: 10px;
+        background: var(--terminal);
+        box-shadow: 0 22px 48px rgba(0, 0, 0, 0.32);
+      }
+
+      .titlebar {
+        position: relative;
+        display: flex;
+        height: 40px;
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        background: var(--chrome);
+      }
+
+      .traffic-lights {
+        display: flex;
+        gap: 8px;
+        margin-left: 14px;
+      }
+
+      .traffic-lights span {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: rgba(250, 249, 246, 0.2);
+      }
+
+      .workspace-title {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .panes {
+        display: grid;
+        height: calc(100% - 40px);
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .pane {
+        position: relative;
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      .pane + .pane {
+        border-left: 1px solid var(--line-strong);
+      }
+
+      .pane-header {
+        position: relative;
+        display: flex;
+        height: 34px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 11px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(250, 249, 246, 0.025);
+        color: var(--subtext);
+        font-size: 12px;
+      }
+
+      .pane-header.accent-title {
+        color: var(--accent);
+      }
+
+      .active-corner {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 0;
+        height: 0;
+        border-top: 16px solid var(--accent);
+        border-right: 16px solid transparent;
+      }
+
+      .tools {
+        color: var(--muted);
+        font-size: 15px;
+        letter-spacing: 4px;
+      }
+
+      .terminal-content {
+        padding: 22px 19px;
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1.65;
+      }
+
+      .command-block {
+        margin-bottom: 22px;
+      }
+
+      .prompt-line {
+        color: var(--text);
+      }
+
+      .path {
+        color: var(--blue);
+      }
+
+      .branch,
+      .success {
+        color: var(--green);
+      }
+
+      .output {
+        margin-top: 6px;
+        color: var(--subtext);
+      }
+
+      .cursor-line {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--muted);
+      }
+
+      .cursor {
+        width: 2px;
+        height: 16px;
+        background: var(--accent);
+      }
+
+      .settings-card {
+        display: grid;
+        min-height: 116px;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 48px;
+        margin-top: 24px;
+        padding: 22px 24px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--surface-1);
+      }
+
+      .breadcrumb {
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.65px;
+        text-transform: uppercase;
+      }
+
+      .setting-name {
+        margin-bottom: 5px;
+        font-size: 14px;
+        font-weight: 560;
+      }
+
+      .setting-description {
+        color: var(--subtext);
+        font-size: 12px;
+      }
+
+      .select {
+        display: flex;
+        width: 190px;
+        height: 34px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 11px;
+        border: 1px solid var(--line-strong);
+        border-radius: 5px;
+        background: var(--surface-2);
+        color: var(--text);
+        font-size: 12px;
+      }
+
+      .select span:last-child {
+        color: var(--subtext);
+        font-size: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Active pane indicator</h1>
+
+      <section class="comparison" aria-label="Comparison of active pane indicator styles">
+        <div>
+          <div class="state-label"><strong>Corner marker</strong><span>current default</span></div>
+          <section class="window">
+            <header class="titlebar">
+              <div class="traffic-lights" aria-hidden="true"><span></span><span></span><span></span></div>
+              <div class="workspace-title">warp · feature/tab-cycling</div>
+            </header>
+            <div class="panes">
+              <article class="pane">
+                <header class="pane-header">
+                  <span class="active-corner" aria-hidden="true"></span>
+                  <span>Codex · UI implementation</span>
+                  <span class="tools">···</span>
+                </header>
+                <div class="terminal-content">
+                  <div class="command-block">
+                    <div class="prompt-line"><span class="path">~/projects/warp</span> <span class="branch">feature/tab-cycling</span> % cargo check</div>
+                    <div class="output success">Finished dev profile</div>
+                  </div>
+                  <div class="cursor-line"><span class="cursor"></span><span>Run a command...</span></div>
+                </div>
+              </article>
+              <article class="pane">
+                <header class="pane-header"><span>Dev server</span><span class="tools">···</span></header>
+                <div class="terminal-content">
+                  <div class="prompt-line"><span class="path">~/projects/warp</span> % pnpm dev</div>
+                  <div class="output">Local: http://localhost:3000</div>
+                </div>
+              </article>
+            </div>
+          </section>
+        </div>
+
+        <div>
+          <div class="state-label"><strong>Accent title</strong><span>proposed option</span></div>
+          <section class="window">
+            <header class="titlebar">
+              <div class="traffic-lights" aria-hidden="true"><span></span><span></span><span></span></div>
+              <div class="workspace-title">warp · feature/tab-cycling</div>
+            </header>
+            <div class="panes">
+              <article class="pane">
+                <header class="pane-header accent-title"><span>Codex · UI implementation</span><span class="tools">···</span></header>
+                <div class="terminal-content">
+                  <div class="command-block">
+                    <div class="prompt-line"><span class="path">~/projects/warp</span> <span class="branch">feature/tab-cycling</span> % cargo check</div>
+                    <div class="output success">Finished dev profile</div>
+                  </div>
+                  <div class="cursor-line"><span class="cursor"></span><span>Run a command...</span></div>
+                </div>
+              </article>
+              <article class="pane">
+                <header class="pane-header"><span>Dev server</span><span class="tools">···</span></header>
+                <div class="terminal-content">
+                  <div class="prompt-line"><span class="path">~/projects/warp</span> % pnpm dev</div>
+                  <div class="output">Local: http://localhost:3000</div>
+                </div>
+              </article>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="settings-card" aria-label="Appearance setting">
+        <div>
+          <div class="breadcrumb">Settings / Appearance / Panes</div>
+          <div class="setting-name">Active pane indicator</div>
+          <div class="setting-description">Choose how the active pane is shown in pane headers.</div>
+        </div>
+        <div class="select"><span>Accent title</span><span>⌄</span></div>
+      </section>
+    </main>
+  </body>
+</html>
